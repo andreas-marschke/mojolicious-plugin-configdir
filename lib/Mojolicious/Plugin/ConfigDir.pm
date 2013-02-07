@@ -5,6 +5,7 @@ use File::Basename 'basename';
 use File::Spec::Functions 'file_name_is_absolute';
 use Mojo::Util 'decamelize';
 use File::Slurp;
+use Data::Dumper;
 
 our $VERSION = '0.001';
 
@@ -15,11 +16,10 @@ sub load {
   # Slurp UTF-8 file
   my %content;
   foreach my $file (read_dir("$dir")) {
-    if ($file =~ m/.*\.conf$/) {
+    if ($file =~ m/.*\.$conf->{ext}$/) {
       open my $handle, "<:encoding(UTF-8)", $dir."/".$file
 	or die qq{Couldn't open config file "$file": $!};
       $content{"$file"} = do { local $/; <$handle> };
-
       $app->log->debug(qq{Reading config file "$dir/$file".});
     }
   }
@@ -30,9 +30,6 @@ sub load {
 
 sub parse {
   my ($self, $contents, $conf, $app) = @_;
-
-#  print Dumper(keys %$content,$content->{"file.conf"});
-
   # Run Perl code
   my $config = {};
   foreach my $file (keys %$contents) {
@@ -51,48 +48,44 @@ sub parse {
 }
 
 sub register {
-  my ($self, $app, $conf) = @_;
+  my ($self, $app, $confs) = @_;
 
   # Config file
-  my $dir = $conf->{dir} || $ENV{MOJO_CONFIG_DIR};
+  my @configs;
+  foreach my $conf (@$confs) {
 
-  unless ($dir) {
-    # Class or executable
-    $dir
-      = $ENV{MOJO_APP} ? decamelize($ENV{MOJO_APP}) : basename($ENV{MOJO_EXE});
+    my $dir = $conf->{dir};
 
-    # Replace ".pl" and ".t" with default extension
-    $dir =~ s/\.(?:pl|t)$//i;
-    $dir .= '.' . ($conf->{ext} || 'conf.d/');
+    # Mode specific config file
+    my $mode = $dir =~ /^(.*)\.([^.]+)$/ ? join('.', $1, $app->mode, $2) : '';
+
+    # Absolute paths
+    my $home = $app->home;
+    $dir = $home->rel_dir($dir) unless file_name_is_absolute $dir;
+    $mode = $home->rel_file($mode) if $mode && !file_name_is_absolute $mode;
+    $mode = undef unless $mode && -e $mode;
+
+    # Make sure ext is set
+    $conf->{ext} = "conf" if not defined $conf->{ext};
+
+    # Read config file
+    my $config = {};
+    if (-d $dir) {
+      $config = $self->load($dir, $conf, $app);
+    }
+
+    # Check for default and mode specific config file
+    elsif (!$conf->{default} && !$mode) {
+      die qq{Config file "$dir" missing, maybe you need to create it?\n};
+    }
+
+    # Merge everything
+    $config = {%$config, %{$self->load($mode, $conf, $app)}} if $mode;
+    $config = {%{$conf->{default}}, %$config} if $conf->{default};
+    push @configs,$config;
   }
 
-  # Mode specific config file
-  my $mode = $dir =~ /^(.*)\.([^.]+)$/ ? join('.', $1, $app->mode, $2) : '';
-
-  # Absolute paths
-  my $home = $app->home;
-  $dir = $home->rel_dir($dir) unless file_name_is_absolute $dir;
-  $mode = $home->rel_file($mode) if $mode && !file_name_is_absolute $mode;
-  $mode = undef unless $mode && -e $mode;
-
-  # Read config file
-  my $config = {};
-  if (-d $dir) {
-    $config = $self->load($dir, $conf, $app);
-  }
-
-  # Check for default and mode specific config file
-  elsif (!$conf->{default} && !$mode) {
-    die qq{Config file "$dir" missing, maybe you need to create it?\n};
-  }
-
-  # Merge everything
-  $config = {%$config, %{$self->load($mode, $conf, $app)}} if $mode;
-  $config = {%{$conf->{default}}, %$config} if $conf->{default};
-  my $current = $app->defaults(config => $app->config)->config;
-  %$current = (%$current, %$config);
-
-  return $current;
+  return @configs;
 }
 
 1;
@@ -103,7 +96,7 @@ Mojolicious::Plugin::ConfigDir - Perl-ish configuration plugin for directories
 
 =head1 SYNOPSIS
 
-  # myapp.conf.d/
+  # dir1.conf.d/
   #    main.conf
   {
     foo       => "bar",
@@ -116,19 +109,14 @@ Mojolicious::Plugin::ConfigDir - Perl-ish configuration plugin for directories
   }
 
   # Mojolicious
-  my $config = $self->plugin('ConfigDir');
+  # has to have a Directory given
+  my ($dir1,$dir2) = $self->plugin('ConfigDir' => [{ dir => "dir1.conf.d" },{dir => "dir2.conf.d"} ]);
 
   # Mojolicious::Lite
-  my $config = plugin 'Config';
-
-  # foo.html.ep
-  %= $config->{foo}
-
-  # The configuration is available application wide
-  my $config = app->config;
+  my @config = plugin 'Config' => [{ dir => "dir1.conf.d" },{dir => "dir2.conf.d"} ];
 
   # Everything can be customized with options
-  my $config = plugin Config => {file => '/etc/myapp.stuff.d/'};
+  my $config = plugin Config => { dir => '/etc/myapp.stuff.d/' , ext => "cnf" };
 
 =head1 DESCRIPTION
 
