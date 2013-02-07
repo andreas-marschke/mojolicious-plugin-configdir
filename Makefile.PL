@@ -8,8 +8,8 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
   NAME         => 'Mojolicious::Plugin::ConfigDir',
   VERSION_FROM => 'lib/Mojolicious/Plugin/ConfigDir.pm',
-  ABSTRACT     => 'Store your Mojolicious configuration in a directory',
-  AUTHOR       => 'Sebastian Riedel <sri@cpan.org>',
+  ABSTRACT     => 'Store your Mojolicious configuration in directories',
+  AUTHOR       => 'Andreas Marschke <andreas.marschke@gmail.com>',
   LICENSE      => 'artistic_2',
   META_MERGE   => {
     requires  => {perl => '5.010001'},
